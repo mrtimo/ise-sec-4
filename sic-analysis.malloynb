@@ -1,0 +1,133 @@
+>>>malloy
+import 'industry2.malloy'
+>>>markdown
+# Let's explore SIC codes from the SEC!
+
+Hi! The Securities and Exchange Commission makes all kinds of data about publicly traded companies available. One of them is the [Financial Statement and Notes Dataset](https://www.sec.gov/dera/data/financial-statement-and-notes-data-set). This dataset includes 7 .csv files. One of them is called "sub" (short for submitters). It contains basic information about the public companies submitting files to the SEC. Let's take a peek inside using the query below. 
+>>>markdown
+Browse around the data result, and see if you can find **cities, addresses, names, SIC codes**, the form type submitted etc.
+>>>malloy
+run: sub -> {
+    group_by: name
+    aggregate: num_submissions is count(adsh) --adsh is a unique identier for every document submission
+}
+>>>markdown
+Now lets limit it 
+>>>malloy
+run: sub -> {
+    group_by: countryba
+    aggregate: num_submissions is count(adsh) --adsh is a unique identier for every document submission
+}
+>>>malloy
+run: sub -> {
+    group_by: form
+    aggregate: num_submissions is count(adsh) --adsh is a unique identier for every document submission
+}
+>>>malloy
+run: sub -> {
+    group_by: sic, sic4.Description
+    aggregate: num_companies is count(name)
+    where: form = "10-K" and period = @2021
+}
+>>>markdown
+# Industries by Year
+>>>malloy
+// industries by year -- good one
+ -- # bar_chart
+run: sub -> {
+    group_by: sic4.SIC, sic4.Description
+    aggregate: num_companies is count(adsh)
+    where: form = "10-K" --and period = @2021 --and sic = null
+    # bar_chart
+    nest: by_sic is {
+        group_by: period.year
+        aggregate: num_companies is count(adsh)
+        limit: 70
+     }
+}
+>>>markdown
+# Industries by State
+>>>malloy
+// industries by state
+ -- # bar_chart
+run: sub -> {
+    group_by: stprba
+    aggregate: num_companies is count(name)
+    where: form = "10-K" --and period = @2021 --and sic = null
+    # bar_chart
+    nest: by_ind is {
+        group_by: sic4.Description
+        aggregate: num_companies is count(name)
+        limit: 10
+     }
+}
+>>>markdown
+# Indusries by zip code
+>>>malloy
+// industries by zip code
+ -- # bar_chart
+run: sub -> {
+    group_by: zipba, stprba
+    aggregate: num_companies is count(name)
+    where: form = "10-K" --and period = @2021 --and sic = null
+    # bar_chart
+    nest: by_ind is {
+        group_by: sic4.Description
+        aggregate: num_companies is count(name)
+        limit: 8
+     }
+}
+>>>markdown
+Let's look at which industries are headquarted in the Sacramento area! 
+>>>malloy
+// industries by first 3 zip
+ -- # bar_chart
+run: sub -> {
+    group_by: sic4.Description
+    aggregate: num_companies is count(name)
+    where: form = "10-K" and SIC_f3 = '958' or SIC_f3 = '956' or SIC_f3 = '957' or SIC_f3 = '942' or SIC_f3 = '945' --and period = @2021 --and sic = null
+}
+>>>malloy
+//replicate Josh Alan Lee's code
+//change in zip
+run: sub -> {
+    group_by: cik_str, name_no_comma, filed_str, fy, zipba, zipma, cityba, cityma, stprba, stprma, stprinc, afs, form, sic, sic4.Description
+    --limit: 1000
+    where: form = "10-K" --| "10-Q"
+    calculate: change_in_sic is pick 'True' when sic != lag(sic) {partition_by: name_no_comma; order_by: filed_str} --and cik_str = lag(cik) --when lag(mas1) != mas1 and lag(name) = name
+    else 'No Change'
+    calculate: old_sic is pick lag(sic) when sic != lag(sic) {partition_by: name_no_comma; order_by: filed_str} --and cik_str = lag(cik) --when lag(mas1) != mas1 and lag(name) = name
+    else 1
+    -- calculate: change_in_bas is pick 'True' when bas1_nc != lag(bas1_nc) {partition_by: cik_str; order_by: filed_str} --when lag(mas1) != mas1 and lag(name) = name
+    -- else 'No Change'
+    -- calculate: change_in_zipba is pick 'True' when zipba != lag(zipba) {partition_by: cik_str; order_by: filed_str} --when lag(mas1) != mas1 and lag(name) = name
+    -- else 'No Change'
+    -- calculate: change_in_zipma is pick 'True' when zipma != lag(zipma) {partition_by: cik_str; order_by: filed_str} --when lag(mas1) != mas1 and lag(name) = name
+    -- else 'No Change'
+   -- change_found_in_bas1 is pick 'True' when lag(bas1) != bas1 --& adsh = lag(adsh)
+    --else 'No Change'
+   order_by: name_no_comma, filed_str
+--calculate: changed is lag(address) { partition_by: company_name; order_by: something }
+} -> {
+  --select: *
+  
+  group_by: old_sic
+  aggregate: sic_1 is count()
+  where: change_in_sic = "True"
+}
+
+query: changed_sic is duckdb.table('./sub*.parquet') -> {
+ group_by: cik, name, filed, fy, zipba, zipma, cityba, cityma, stprba, stprma, stprinc, afs, form, sic
+    --limit: 1000
+    where: form = "10-K" --| "10-Q"
+    calculate: change_in_sic is pick 'True' when sic != lag(sic) {partition_by: name; order_by: filed} --and cik_str = lag(cik) --when lag(mas1) != mas1 and lag(name) = name
+    else 'No Change'
+    calculate: old_sic is pick lag(sic) when sic != lag(sic) {partition_by: name; order_by: filed} --and cik_str = lag(cik) --when lag(mas1) != mas1 and lag(name) = name
+    else 1
+   order_by: name, filed
+} -> {
+  group_by: old_sic, sic
+ -- aggregate: sic_1 is count()
+  where: change_in_sic = "True"
+}
+
